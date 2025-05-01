@@ -10,12 +10,12 @@ if not os.path.exists(DB_PATH):
     st.error("SQLite database not found. Please ensure 'family_tree.db' is in the root directory.")
     st.stop()
 
-# Database connection
-conn = sqlite3.connect(DB_PATH)
+# ✅ Fix: allow access across Streamlit's threads
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
-# URL Parameter (updated syntax)
+# URL Parameter (new Streamlit version)
 params = st.query_params
 uid = params.get("id", "22")
 
