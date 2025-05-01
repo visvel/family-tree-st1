@@ -1,6 +1,5 @@
 import streamlit as st
 import sqlite3
-import urllib.parse
 
 st.set_page_config(layout='wide')
 
@@ -9,9 +8,9 @@ conn = sqlite3.connect("family_tree.db")
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
-# URL Parameter
-params = st.experimental_get_query_params()
-uid = params.get("id", ["22"])[0]
+# URL Parameter (updated to use st.query_params)
+params = st.query_params
+uid = params.get("id", "22")
 
 def get_person(uid):
     cursor.execute("SELECT * FROM people WHERE id = ?", (uid,))
