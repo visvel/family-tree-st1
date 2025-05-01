@@ -1,14 +1,21 @@
 import streamlit as st
 import sqlite3
+import os
 
 st.set_page_config(layout='wide')
 
+DB_PATH = "family_tree.db"
+
+if not os.path.exists(DB_PATH):
+    st.error("SQLite database not found. Please ensure 'family_tree.db' is in the root directory.")
+    st.stop()
+
 # Database connection
-conn = sqlite3.connect("family_tree.db")
+conn = sqlite3.connect(DB_PATH)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
-# URL Parameter (updated to use st.query_params)
+# URL Parameter (updated syntax)
 params = st.query_params
 uid = params.get("id", "22")
 
@@ -27,6 +34,10 @@ if "child_uids" not in st.session_state:
     st.session_state.child_uids = []
 
 person = get_person(uid)
+
+if not person:
+    st.error(f"No record found for ID: {uid}")
+    st.stop()
 
 st.title("Family Tree Viewer")
 st.subheader(f"Person: {person['name']} (ID: {uid})")
