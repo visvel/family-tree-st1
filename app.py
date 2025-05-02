@@ -30,6 +30,7 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
+# --- Init State ---
 if "node_map" not in st.session_state:
     st.session_state.node_map = {}
 if "parent_queue" not in st.session_state:
@@ -43,6 +44,7 @@ if "show_parents" not in st.session_state:
 if "show_children" not in st.session_state:
     st.session_state.show_children = False
 
+# --- Fetch + Build Node ---
 def fetch_person(uid):
     uid = normalize_id(uid)
     cursor.execute("SELECT * FROM people WHERE id = ?", (uid,))
@@ -69,6 +71,7 @@ def build_node(uid):
 
 build_node(query_id)
 
+# --- Expand Logic ---
 def expand_parents():
     current_top_ids = list(st.session_state.top_ids)
     new_parents = set()
@@ -106,7 +109,7 @@ def expand_children():
                 new_children.add(cid)
     st.session_state.child_queue.extend(new_children)
 
-# Buttons
+# --- UI Buttons ---
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("+ Show Parents"):
@@ -123,7 +126,7 @@ if st.session_state.show_children:
     st.session_state.show_children = False
     expand_children()
 
-# Root builder
+# --- Render Root Builder ---
 def find_root_candidates():
     all_nodes = st.session_state.node_map
     has_parents = set()
@@ -142,10 +145,25 @@ def build_tree_forest():
 
 tree_data = build_tree_forest()
 
+# --- Clean circular refs for JSON ---
+def clean_tree(node, visited=None):
+    if visited is None:
+        visited = set()
+    if node["id"] in visited:
+        return None
+    visited.add(node["id"])
+    return {
+        "name": node["name"],
+        "title": node["title"],
+        "children": list(filter(None, [clean_tree(child, visited.copy()) for child in node.get("children", [])]))
+    }
+
+# --- Render ---
 if not tree_data["children"]:
     st.error("❌ No data to render.")
 else:
     with open("d3_family_tree_template.html", "r") as f:
         d3_template = f.read()
-    rendered_html = d3_template.replace("{{DATA}}", json.dumps(tree_data))
+    safe_tree = clean_tree(tree_data)
+    rendered_html = d3_template.replace("{{DATA}}", json.dumps(safe_tree))
     html(rendered_html, height=800, scrolling=True)
