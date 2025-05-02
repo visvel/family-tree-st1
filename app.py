@@ -37,8 +37,6 @@ if "child_queue" not in st.session_state:
     st.session_state.child_queue = deque([query_id])
 if "parent_queue" not in st.session_state:
     st.session_state.parent_queue = deque([query_id])
-if "virtual_root" not in st.session_state:
-    st.session_state.virtual_root = query_id
 if "show_parents" not in st.session_state:
     st.session_state.show_parents = False
 if "show_children" not in st.session_state:
@@ -67,56 +65,36 @@ def build_node(uid):
     st.session_state.node_map[uid] = node
     return node
 
-# Initial root node
+# Root node init
 if st.session_state.root_id not in st.session_state.node_map:
     build_node(st.session_state.root_id)
 
 def expand_parents():
-    to_add = deque()
+    new_parents = set()
     for _ in range(len(st.session_state.parent_queue)):
         uid = normalize_id(st.session_state.parent_queue.popleft())
-        child_node = build_node(uid)
+        child_node = st.session_state.node_map.get(uid)
         person = fetch_person(uid)
-        if not person:
+        if not person or not child_node:
             continue
 
-        father = normalize_id(person["father_id"])
-        mother = normalize_id(person["mother_id"])
-
-        if not father and not mother:
-            continue
-
-        couple_id = f"couple_{father}_{mother}"
-        if couple_id not in st.session_state.node_map:
-            couple_node = {
-                "id": couple_id,
-                "name": "",
-                "children": [child_node],
-                "is_couple": True
-            }
-            if father:
-                father_node = build_node(father)
-                couple_node["father"] = father_node
-            if mother:
-                mother_node = build_node(mother)
-                couple_node["mother"] = mother_node
-            st.session_state.node_map[couple_id] = couple_node
-        else:
-            couple_node = st.session_state.node_map[couple_id]
-            if child_node not in couple_node["children"]:
-                couple_node["children"].append(child_node)
-        to_add.extend([father, mother])
-        st.session_state.virtual_root = couple_id  # re-root tree at topmost couple
-
-    st.session_state.parent_queue.extend(filter(None, to_add))
+        for parent_type in ["father_id", "mother_id"]:
+            pid = normalize_id(person[parent_type])
+            if pid:
+                parent_node = build_node(pid)
+                if parent_node:
+                    if child_node not in parent_node["children"]:
+                        parent_node["children"].append(child_node)
+                    new_parents.add(pid)
+    st.session_state.parent_queue.extend(new_parents)
 
 def expand_children():
     to_add = deque()
     for _ in range(len(st.session_state.child_queue)):
         uid = normalize_id(st.session_state.child_queue.popleft())
-        parent_node = build_node(uid)
+        parent_node = st.session_state.node_map.get(uid)
         person = fetch_person(uid)
-        if not person or not person["children_ids"]:
+        if not person or not parent_node or not person["children_ids"]:
             continue
         child_ids = [normalize_id(cid) for cid in person["children_ids"].split(";") if cid]
         for cid in child_ids:
@@ -126,7 +104,7 @@ def expand_children():
                 to_add.append(cid)
     st.session_state.child_queue.extend(to_add)
 
-# Buttons
+# UI
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("+ Show Parents"):
@@ -143,35 +121,8 @@ if st.session_state.show_children:
     st.session_state.show_children = False
     expand_children()
 
-# Tree render logic
-def render_tree(root_id):
-    root = st.session_state.node_map.get(root_id)
-    if not root:
-        return None
-    if root.get("is_couple"):
-        children = root["children"]
-        return {
-            "name": "",
-            "children": [
-                {
-                    "name": root["father"]["name"] if "father" in root else "",
-                    "title": root["father"]["title"] if "father" in root else "",
-                    "children": []
-                },
-                {
-                    "name": root["mother"]["name"] if "mother" in root else "",
-                    "title": root["mother"]["title"] if "mother" in root else "",
-                    "children": []
-                },
-                {
-                    "name": "▼",
-                    "children": children
-                }
-            ]
-        }
-    return root
-
-tree_data = render_tree(st.session_state.virtual_root)
+# Render tree
+tree_data = st.session_state.node_map.get(st.session_state.root_id)
 
 if not tree_data:
     st.error("❌ No data to render.")
