@@ -30,9 +30,10 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
-# --- Init State ---
 if "node_map" not in st.session_state:
     st.session_state.node_map = {}
+if "couple_map" not in st.session_state:
+    st.session_state.couple_map = {}
 if "parent_queue" not in st.session_state:
     st.session_state.parent_queue = deque([query_id])
 if "child_queue" not in st.session_state:
@@ -44,7 +45,6 @@ if "show_parents" not in st.session_state:
 if "show_children" not in st.session_state:
     st.session_state.show_children = False
 
-# --- Fetch + Build Node ---
 def fetch_person(uid):
     uid = normalize_id(uid)
     cursor.execute("SELECT * FROM people WHERE id = ?", (uid,))
@@ -64,14 +64,31 @@ def build_node(uid):
         "notes": person["notes"],
         "title": f"Valavu: {person['valavu']}\\nNotes: {person['notes']}",
         "children": [],
-        "parents": []
+        "is_couple": False
     }
     st.session_state.node_map[uid] = node
     return node
 
+def build_couple_node(father_id, mother_id):
+    cid = f"couple_{father_id}_{mother_id}"
+    if cid in st.session_state.node_map:
+        return st.session_state.node_map[cid]
+
+    couple_node = {
+        "id": cid,
+        "name": "",
+        "title": "",
+        "children": [],
+        "is_couple": True,
+        "father": build_node(father_id),
+        "mother": build_node(mother_id)
+    }
+    st.session_state.node_map[cid] = couple_node
+    st.session_state.couple_map[cid] = couple_node
+    return couple_node
+
 build_node(query_id)
 
-# --- Expand Logic ---
 def expand_parents():
     current_top_ids = list(st.session_state.top_ids)
     new_parents = set()
@@ -81,21 +98,25 @@ def expand_parents():
         person = fetch_person(uid)
         if not person or not child:
             continue
-        for p_type in ["father_id", "mother_id"]:
-            pid = normalize_id(person[p_type])
-            if pid:
-                parent_node = build_node(pid)
-                if child not in parent_node["children"]:
-                    parent_node["children"].append(child)
-                if parent_node not in child["parents"]:
-                    child["parents"].append(parent_node)
-                new_parents.add(pid)
+
+        father_id = normalize_id(person["father_id"])
+        mother_id = normalize_id(person["mother_id"])
+
+        if not father_id and not mother_id:
+            continue
+
+        couple_node = build_couple_node(father_id or "NA", mother_id or "NA")
+        if child not in couple_node["children"]:
+            couple_node["children"].append(child)
+
+        new_parents.update(filter(None, [father_id, mother_id]))
+
     st.session_state.top_ids = new_parents.union(st.session_state.top_ids)
     st.session_state.parent_queue.extend(new_parents)
 
 def expand_children():
     new_children = set()
-    leaf_ids = [uid for uid in st.session_state.node_map if not st.session_state.node_map[uid]["children"]]
+    leaf_ids = [uid for uid in st.session_state.node_map if not st.session_state.node_map[uid]["children"] and not st.session_state.node_map[uid].get("is_couple")]
     for uid in leaf_ids:
         parent = build_node(uid)
         person = fetch_person(uid)
@@ -105,11 +126,10 @@ def expand_children():
             child = build_node(cid)
             if child and child not in parent["children"]:
                 parent["children"].append(child)
-                child["parents"].append(parent)
                 new_children.add(cid)
     st.session_state.child_queue.extend(new_children)
 
-# --- UI Buttons ---
+# UI
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("+ Show Parents"):
@@ -126,15 +146,12 @@ if st.session_state.show_children:
     st.session_state.show_children = False
     expand_children()
 
-# --- Root builder ---
 def find_root_candidates():
-    all_nodes = st.session_state.node_map
     has_parents = set()
-    for node in all_nodes.values():
-        for c in node.get("children", []):
-            has_parents.add(c["id"])
-    roots = [n for n in all_nodes if n not in has_parents]
-    return roots
+    for node in st.session_state.node_map.values():
+        for child in node.get("children", []):
+            has_parents.add(child["id"])
+    return [n for n in st.session_state.node_map if n not in has_parents]
 
 def build_tree_forest():
     forest = []
@@ -143,23 +160,35 @@ def build_tree_forest():
         forest.append(root)
     return { "name": "root", "children": forest }
 
-tree_data = build_tree_forest()
-
-# --- Clean tree for JSON serialization ---
-def clean_tree(node, visited=None):
-    if visited is None:
-        visited = set()
-    node_id = node.get("id") or node.get("name")
-    if node_id in visited:
-        return None
-    visited.add(node_id)
+def clean_tree(node):
+    if node.get("is_couple"):
+        return {
+            "name": "Parents",
+            "title": "",
+            "children": [
+                {
+                    "name": node["father"]["name"] if node.get("father") else "",
+                    "title": node["father"]["title"] if node.get("father") else ""
+                },
+                {
+                    "name": node["mother"]["name"] if node.get("mother") else "",
+                    "title": node["mother"]["title"] if node.get("mother") else ""
+                },
+                {
+                    "name": "",
+                    "title": "",
+                    "children": [clean_tree(child) for child in node.get("children", [])]
+                }
+            ]
+        }
     return {
-        "name": node.get("name", ""),
-        "title": node.get("title", ""),
-        "children": list(filter(None, [clean_tree(child, visited.copy()) for child in node.get("children", [])]))
+        "name": node["name"],
+        "title": node["title"],
+        "children": [clean_tree(child) for child in node.get("children", [])]
     }
 
-# --- Render ---
+tree_data = build_tree_forest()
+
 if not tree_data["children"]:
     st.error("❌ No data to render.")
 else:
