@@ -126,7 +126,7 @@ if st.session_state.show_children:
     st.session_state.show_children = False
     expand_children()
 
-# --- Render Root Builder ---
+# --- Root builder ---
 def find_root_candidates():
     all_nodes = st.session_state.node_map
     has_parents = set()
@@ -145,16 +145,17 @@ def build_tree_forest():
 
 tree_data = build_tree_forest()
 
-# --- Clean circular refs for JSON ---
+# --- Clean tree for JSON serialization ---
 def clean_tree(node, visited=None):
     if visited is None:
         visited = set()
-    if node["id"] in visited:
+    node_id = node.get("id") or node.get("name")
+    if node_id in visited:
         return None
-    visited.add(node["id"])
+    visited.add(node_id)
     return {
-        "name": node["name"],
-        "title": node["title"],
+        "name": node.get("name", ""),
+        "title": node.get("title", ""),
         "children": list(filter(None, [clean_tree(child, visited.copy()) for child in node.get("children", [])]))
     }
 
