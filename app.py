@@ -17,8 +17,10 @@ def normalize_id(raw):
         return str(raw).strip()
 
 params = st.query_params
-query_id = normalize_id(params.get("id", "22"))
-st.write(f"🆔 Query ID: {query_id}")
+query_id = normalize_id(params.get("id"))
+if not query_id:
+    st.error("❗ Missing `id` parameter in URL. Use ?id=UNIQUE_ID.")
+    st.stop()
 
 if not os.path.exists(DB_PATH):
     st.error("❌ SQLite database not found.")
@@ -28,15 +30,14 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
-# Initialize state
-if "root_id" not in st.session_state:
-    st.session_state.root_id = query_id
 if "node_map" not in st.session_state:
     st.session_state.node_map = {}
-if "child_queue" not in st.session_state:
-    st.session_state.child_queue = deque([query_id])
 if "parent_queue" not in st.session_state:
     st.session_state.parent_queue = deque([query_id])
+if "child_queue" not in st.session_state:
+    st.session_state.child_queue = deque([query_id])
+if "top_ids" not in st.session_state:
+    st.session_state.top_ids = set([query_id])
 if "show_parents" not in st.session_state:
     st.session_state.show_parents = False
 if "show_children" not in st.session_state:
@@ -60,51 +61,52 @@ def build_node(uid):
         "valavu": person["valavu"],
         "notes": person["notes"],
         "title": f"Valavu: {person['valavu']}\\nNotes: {person['notes']}",
-        "children": []
+        "children": [],
+        "parents": []
     }
     st.session_state.node_map[uid] = node
     return node
 
-# Root node init
-if st.session_state.root_id not in st.session_state.node_map:
-    build_node(st.session_state.root_id)
+build_node(query_id)
 
 def expand_parents():
+    current_top_ids = list(st.session_state.top_ids)
     new_parents = set()
-    for _ in range(len(st.session_state.parent_queue)):
-        uid = normalize_id(st.session_state.parent_queue.popleft())
-        child_node = st.session_state.node_map.get(uid)
-        person = fetch_person(uid)
-        if not person or not child_node:
-            continue
 
-        for parent_type in ["father_id", "mother_id"]:
-            pid = normalize_id(person[parent_type])
+    for uid in current_top_ids:
+        child = build_node(uid)
+        person = fetch_person(uid)
+        if not person or not child:
+            continue
+        for p_type in ["father_id", "mother_id"]:
+            pid = normalize_id(person[p_type])
             if pid:
                 parent_node = build_node(pid)
-                if parent_node:
-                    if child_node not in parent_node["children"]:
-                        parent_node["children"].append(child_node)
-                    new_parents.add(pid)
+                if child not in parent_node["children"]:
+                    parent_node["children"].append(child)
+                if parent_node not in child["parents"]:
+                    child["parents"].append(parent_node)
+                new_parents.add(pid)
+    st.session_state.top_ids = new_parents.union(st.session_state.top_ids)
     st.session_state.parent_queue.extend(new_parents)
 
 def expand_children():
-    to_add = deque()
-    for _ in range(len(st.session_state.child_queue)):
-        uid = normalize_id(st.session_state.child_queue.popleft())
-        parent_node = st.session_state.node_map.get(uid)
+    new_children = set()
+    leaf_ids = [uid for uid in st.session_state.node_map if not st.session_state.node_map[uid]["children"]]
+    for uid in leaf_ids:
+        parent = build_node(uid)
         person = fetch_person(uid)
-        if not person or not parent_node or not person["children_ids"]:
+        if not person or not person["children_ids"]:
             continue
-        child_ids = [normalize_id(cid) for cid in person["children_ids"].split(";") if cid]
-        for cid in child_ids:
-            child_node = build_node(cid)
-            if child_node and child_node not in parent_node["children"]:
-                parent_node["children"].append(child_node)
-                to_add.append(cid)
-    st.session_state.child_queue.extend(to_add)
+        for cid in [normalize_id(c) for c in person["children_ids"].split(";") if c.strip()]:
+            child = build_node(cid)
+            if child and child not in parent["children"]:
+                parent["children"].append(child)
+                child["parents"].append(parent)
+                new_children.add(cid)
+    st.session_state.child_queue.extend(new_children)
 
-# UI
+# Buttons
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("+ Show Parents"):
@@ -121,10 +123,26 @@ if st.session_state.show_children:
     st.session_state.show_children = False
     expand_children()
 
-# Render tree
-tree_data = st.session_state.node_map.get(st.session_state.root_id)
+# Root builder
+def find_root_candidates():
+    all_nodes = st.session_state.node_map
+    has_parents = set()
+    for node in all_nodes.values():
+        for c in node.get("children", []):
+            has_parents.add(c["id"])
+    roots = [n for n in all_nodes if n not in has_parents]
+    return roots
 
-if not tree_data:
+def build_tree_forest():
+    forest = []
+    for rid in find_root_candidates():
+        root = st.session_state.node_map[rid]
+        forest.append(root)
+    return { "name": "root", "children": forest }
+
+tree_data = build_tree_forest()
+
+if not tree_data["children"]:
     st.error("❌ No data to render.")
 else:
     with open("d3_family_tree_template.html", "r") as f:
