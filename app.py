@@ -30,6 +30,7 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
+# --- Init State ---
 if "node_map" not in st.session_state:
     st.session_state.node_map = {}
 if "couple_map" not in st.session_state:
@@ -45,6 +46,7 @@ if "show_parents" not in st.session_state:
 if "show_children" not in st.session_state:
     st.session_state.show_children = False
 
+# --- DB Helpers ---
 def fetch_person(uid):
     uid = normalize_id(uid)
     cursor.execute("SELECT * FROM people WHERE id = ?", (uid,))
@@ -87,6 +89,7 @@ def build_couple_node(father_id, mother_id):
     st.session_state.couple_map[cid] = couple_node
     return couple_node
 
+# --- Tree Construction ---
 build_node(query_id)
 
 def expand_parents():
@@ -129,7 +132,7 @@ def expand_children():
                 new_children.add(cid)
     st.session_state.child_queue.extend(new_children)
 
-# UI
+# --- UI Buttons ---
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("+ Show Parents"):
@@ -146,6 +149,7 @@ if st.session_state.show_children:
     st.session_state.show_children = False
     expand_children()
 
+# --- Tree Root + Clean ---
 def find_root_candidates():
     has_parents = set()
     for node in st.session_state.node_map.values():
@@ -167,12 +171,12 @@ def clean_tree(node):
             "title": "",
             "children": [
                 {
-                    "name": node["father"]["name"] if node.get("father") else "",
-                    "title": node["father"]["title"] if node.get("father") else ""
+                    "name": node.get("father", {}).get("name", ""),
+                    "title": node.get("father", {}).get("title", "")
                 },
                 {
-                    "name": node["mother"]["name"] if node.get("mother") else "",
-                    "title": node["mother"]["title"] if node.get("mother") else ""
+                    "name": node.get("mother", {}).get("name", ""),
+                    "title": node.get("mother", {}).get("title", "")
                 },
                 {
                     "name": "",
@@ -182,11 +186,12 @@ def clean_tree(node):
             ]
         }
     return {
-        "name": node["name"],
-        "title": node["title"],
+        "name": node.get("name", ""),
+        "title": node.get("title", ""),
         "children": [clean_tree(child) for child in node.get("children", [])]
     }
 
+# --- Render ---
 tree_data = build_tree_forest()
 
 if not tree_data["children"]:
