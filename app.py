@@ -76,13 +76,24 @@ def build_couple_node(father_id, mother_id):
 
     couple_node = {
         "id": cid,
-        "name": "",
+        "name": "Parents",
         "title": "",
         "children": [],
         "is_couple": True,
         "father": build_node(father_id),
         "mother": build_node(mother_id)
     }
+
+    # Get shared children
+    father = fetch_person(father_id)
+    if father and father.get("children_ids"):
+        for cid in father["children_ids"].split(";"):
+            cid = normalize_id(cid)
+            if cid:
+                child = build_node(cid)
+                if child and child not in couple_node["children"]:
+                    couple_node["children"].append(child)
+
     st.session_state.node_map[cid] = couple_node
     st.session_state.couple_map[cid] = couple_node
     return couple_node
@@ -110,7 +121,7 @@ def expand_parents():
             couple_node["children"].append(child)
 
         if father_id:
-            new_parents.add(father_id)  # Expand only father's lineage
+            new_parents.add(father_id)
 
     st.session_state.top_ids = new_parents.union(st.session_state.top_ids)
     st.session_state.parent_queue.extend(new_parents)
@@ -130,7 +141,6 @@ def expand_children():
                 new_children.add(cid)
     st.session_state.child_queue.extend(new_children)
 
-# UI
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("+ Show Parents"):
