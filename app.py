@@ -198,4 +198,3 @@ else:
     safe_tree = clean_tree(tree_data)
     rendered_html = d3_template.replace("{{DATA}}", json.dumps(safe_tree))
     html(rendered_html, height=800, scrolling=True)
-
