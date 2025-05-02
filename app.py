@@ -16,12 +16,18 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
+# --- Normalize IDs (e.g., 6.0 -> 6) ---
+def normalize_id(raw):
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return str(int(float(raw)))
+    except:
+        return str(raw).strip()
+
 # --- Get ID from URL ---
 params = st.query_params
-query_id = params.get("id", "22")
-if isinstance(query_id, list):
-    query_id = query_id[0]
-query_id = str(query_id).strip()
+query_id = normalize_id(params.get("id", "22"))
 st.write(f"🆔 URL query ID = {query_id}")
 
 # --- Init State ---
@@ -40,11 +46,15 @@ if "show_children" not in st.session_state:
 
 # --- Fetch & Build Node ---
 def fetch_person(uid):
+    uid = normalize_id(uid)
     st.write(f"🔍 Fetching person: {uid}")
     cursor.execute("SELECT * FROM people WHERE id = ?", (uid,))
     return cursor.fetchone()
 
 def build_node(uid):
+    uid = normalize_id(uid)
+    if uid in st.session_state.node_map:
+        return st.session_state.node_map[uid]
     person = fetch_person(uid)
     if not person:
         st.warning(f"⚠️ No person found for ID: {uid}")
@@ -71,20 +81,21 @@ def expand_parents():
     st.write("🔼 Expanding parents for queue:", list(st.session_state.parent_queue))
     to_add = deque()
     for _ in range(len(st.session_state.parent_queue)):
-        uid = st.session_state.parent_queue.popleft()
+        uid = normalize_id(st.session_state.parent_queue.popleft())
         node = st.session_state.node_map.get(uid)
         person = fetch_person(uid)
         if not person or not node:
             continue
         for parent_id in [person["father_id"], person["mother_id"]]:
-            if parent_id:
-                if parent_id not in st.session_state.node_map:
-                    parent_node = build_node(parent_id)
+            pid = normalize_id(parent_id)
+            if pid:
+                if pid not in st.session_state.node_map:
+                    parent_node = build_node(pid)
                     if parent_node:
                         parent_node["children"].append(node)
-                        to_add.append(parent_id)
+                        to_add.append(pid)
                 else:
-                    existing = st.session_state.node_map[parent_id]
+                    existing = st.session_state.node_map[pid]
                     if node not in existing["children"]:
                         existing["children"].append(node)
     st.session_state.parent_queue.extend(to_add)
@@ -94,12 +105,12 @@ def expand_children():
     st.write("🔽 Expanding children for queue:", list(st.session_state.child_queue))
     to_add = deque()
     for _ in range(len(st.session_state.child_queue)):
-        uid = st.session_state.child_queue.popleft()
+        uid = normalize_id(st.session_state.child_queue.popleft())
         node = st.session_state.node_map.get(uid)
         person = fetch_person(uid)
         if not person or not node or not person["children_ids"]:
             continue
-        child_ids = [cid.strip() for cid in person["children_ids"].split(";") if cid.strip()]
+        child_ids = [normalize_id(cid) for cid in person["children_ids"].split(";") if cid.strip()]
         for cid in child_ids:
             if cid not in st.session_state.node_map:
                 child_node = build_node(cid)
@@ -130,7 +141,7 @@ if st.session_state.show_children:
     st.session_state.show_children = False
     expand_children()
 
-# --- Render Final Tree ---
+# --- Render Tree ---
 def render_tree(uid):
     return st.session_state.node_map.get(uid)
 
