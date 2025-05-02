@@ -84,9 +84,9 @@ def build_couple_node(father_id, mother_id):
         "mother": build_node(mother_id)
     }
 
-    # Get shared children
+    # Get shared children from father's record
     father = fetch_person(father_id)
-    if father and father.get("children_ids"):
+    if father and father["children_ids"]:
         for cid in father["children_ids"].split(";"):
             cid = normalize_id(cid)
             if cid:
